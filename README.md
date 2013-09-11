@@ -34,7 +34,7 @@ Add the following to your [`Podfile`](http://docs.cocoapods.org/podfile.html)
 and run `pod install`
 
 ```
-pod 'AWSS3Client', :git => 'https://github.com/mirego/MCAWSS3Client.git'
+pod 'AWSS3Client', :git => 'https://github.com/swivl/AWSS3Client.git'
 ```
 
 Don't forget to `#import "AWSS3Client.h"` where it's needed.
@@ -43,9 +43,9 @@ Don't forget to `#import "AWSS3Client.h"` where it's needed.
 
 Sergei Me
 
-http://github.com/merenkoff
-http://twitter.com/sergeimer
-mer.sergei@gmail.com
+* http://github.com/merenkoff
+* http://twitter.com/sergeimer
+* mer.sergei@gmail.com
 
 ## License
 
