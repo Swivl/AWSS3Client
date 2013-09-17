@@ -162,6 +162,84 @@ NSString * const AFAmazonS3SAEast1Region = @"s3-sa-east-1.amazonaws.com";
     [self enqueueHTTPRequestOperation:operation];
 }
 
+- (void)putObjectWithPath:(NSString*)path key:(NSString*)key mimeType:(NSString*)mimeType permission:(AWSS3ObjectPermission)permission progress:(void (^)(NSUInteger bytesWritten, long long totalBytesWritten, long long totalBytesExpectedToWrite))progress success:(void (^)(AFHTTPRequestOperation* operation, id responseObject))success failure:(void (^)(AFHTTPRequestOperation* operation, NSError* error))failure
+{
+    [self clearAuthorizationHeader];
+    
+    NSString* dateString = [self dateString];
+    [self setDefaultHeader:@"Date" value:dateString];
+    
+    NSString* contentMD5 = @"";
+    NSMutableArray* xAmzHeaders = [[NSMutableArray alloc] init];
+    
+    switch (permission) {
+        case AWSS3ObjectPermissionsPrivate:
+            [self setDefaultHeader:@"x-amz-acl" value:@"private"];
+            break;
+        case AWSS3ObjectPermissionPublicRead:
+            [self setDefaultHeader:@"x-amz-acl" value:@"public-read"];
+            break;
+        case AWSS3ObjectPermissionPublicReadWrite:
+            [self setDefaultHeader:@"x-amz-acl" value:@"public-read-write"];
+            break;
+        case AWSS3ObjectPermissionAuthenticatedRead:
+            [self setDefaultHeader:@"x-amz-acl" value:@"authenticated-read"];
+            break;
+        case AWSS3ObjectPermissionBucketOwnerRead:
+            [self setDefaultHeader:@"x-amz-acl" value:@"bucket-owner-read"];
+            break;
+        case AWSS3ObjectPermissionBucketOwnerFullControl:
+            [self setDefaultHeader:@"x-amz-acl" value:@"bucket-owner-full-control"];
+            break;
+    }
+    [xAmzHeaders addObject:@"x-amz-acl"];
+    
+    if (_sessionToken) {
+        [self setDefaultHeader:@"x-amz-security-token" value:_sessionToken];
+        [xAmzHeaders addObject:@"x-amz-security-token"];
+    }
+    
+    [xAmzHeaders sortUsingSelector:@selector(compare:)];
+    NSString* canonicalizedAmzHeaders = @"";
+    for (NSString* xAmzHeader in xAmzHeaders) {
+        NSString* headerValue = [self defaultValueForHeader:xAmzHeader];
+        canonicalizedAmzHeaders = [canonicalizedAmzHeaders
+                                   stringByAppendingFormat:@"%@:%@\n",
+                                   xAmzHeader,
+                                   headerValue];
+    }
+    
+    NSString* requestMethod = @"PUT";
+    NSString* canonicalizedResource = [self canonicalizedResourceWithKey:key];
+    NSString* stringToSign = [self stringToSignForRequestMethod:requestMethod contentMD5:contentMD5 mimeType:mimeType dateString:dateString headers:canonicalizedAmzHeaders resource:canonicalizedResource];
+    
+    NSString* signature = [self base64EncodedStringFromData:[self HMACSHA1WithKey:self.secretKey string:stringToSign]];
+    NSString* authorizationString = [NSString stringWithFormat:@"AWS %@:%@", self.accessKey, signature];
+    [self setDefaultHeader:@"Authorization" value:authorizationString];
+    
+    NSInputStream *postBodyStream = [[NSInputStream alloc] initWithFileAtPath:path];
+    
+
+    NSDictionary *fileAttributes = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
+    
+    NSNumber *fileSizeNumber = [fileAttributes objectForKey:NSFileSize];
+    NSString *contentLength = [fileSizeNumber stringValue];
+    
+    NSMutableURLRequest* request = [self requestWithMethod:@"PUT" path:canonicalizedResource parameters:nil];
+    [request setHTTPBodyStream:postBodyStream];
+    [request addValue:contentLength forHTTPHeaderField:@"Content-Length"];
+    
+    AFHTTPRequestOperation* operation = [self HTTPRequestOperationWithRequest:request success:^(AFHTTPRequestOperation* operation, id responseObject) {
+        if (success) success(operation, responseObject);
+    } failure:^(AFHTTPRequestOperation* operation, NSError* error) {
+        if (failure) failure(operation, error);
+    }];
+    if (progress)
+        [operation setUploadProgressBlock:progress];
+    
+    [self enqueueHTTPRequestOperation:operation];
+}
+
 - (void)getObjectToFileAtPath:(NSString*)path key:(NSString*)key success:(void (^)(AFHTTPRequestOperation* operation, id responseObject))success failure:(void (^)(AFHTTPRequestOperation* operation, NSError* error))failure
 {
     [self clearAuthorizationHeader];
