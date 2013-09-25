@@ -49,4 +49,21 @@ typedef enum {
 
 - (void)getObjectToFileAtPath:(NSString*)path key:(NSString*)key success:(void (^)(AFHTTPRequestOperation* operation, id responseObject))success failure:(void (^)(AFHTTPRequestOperation* operation, NSError* error))failure;
 
+//Multy part
+- (void)initiateMultipartToKey:(NSString*)key success:(void (^)(AFHTTPRequestOperation* operation, id responseObject))success failure:(void (^)(AFHTTPRequestOperation* operation, NSError* error))failure;
+
+- (void)putMultipartData:(NSData *)data
+                     key:(NSString*)key
+                uploadId:(NSString *)uploadId
+              partNumber:(NSNumber *)partNumber
+                progress:(void (^)(NSUInteger bytesWritten, long long totalBytesWritten, long long totalBytesExpectedToWrite))progress
+                 success:(void (^)(id responseObject))success
+                 failure:(void (^)(NSError *error))failure;
+
+- (void)finalizeMultipartToKey:(NSString*)key
+                      uploadId:(NSString *)uploadId
+                          size:(long long)size
+                         eTags:(NSArray *)eTags
+                       success:(void (^)(id responseObject))success
+                       failure:(void (^)(NSError *error))failure;
 @end
