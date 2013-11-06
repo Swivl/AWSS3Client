@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name     = 'AWSS3Client'
-  s.version  = '0.1.3'
+  s.version  = '0.1.4'
   s.license  = 'MIT'
   s.summary  = 'Alternative Amazon S3 client (with multipart uploading) based on AFHTTPClient.'
   s.homepage = 'https://github.com/swivl/AWSS3Client'

@@ -270,6 +270,182 @@ NSString * const AFAmazonS3SAEast1Region = @"s3-sa-east-1.amazonaws.com";
 }
 
 
+#pragma mark - Multipart upload
+- (void)initiateMultipartToKey:(NSString*)key
+                       success:(void (^)(AFHTTPRequestOperation* operation, id responseObject))success
+                       failure:(void (^)(AFHTTPRequestOperation* operation, NSError* error))failure
+{
+    [self performSelector:@selector(setDefaultHeaders:) withObject:[NSMutableDictionary dictionary]];
+    [self setDefaultHeader:@"Accept" value:@"application/xml"];
+    [self clearAuthorizationHeader];
+    
+    NSString* dateString = [self dateString];
+    [self setDefaultHeader:@"Date" value:dateString];
+    
+    NSString* contentMD5 = @"";
+   
+    
+    NSMutableArray* xAmzHeaders = [[NSMutableArray alloc] init];
+    
+    [self setDefaultHeader:@"x-amz-acl" value:@"public-read"];
+    [xAmzHeaders addObject:@"x-amz-acl"];
+    
+    if (_sessionToken) {
+        [self setDefaultHeader:@"x-amz-security-token" value:_sessionToken];
+        [xAmzHeaders addObject:@"x-amz-security-token"];
+    }
+    
+    [xAmzHeaders sortUsingSelector:@selector(compare:)];
+    NSString* canonicalizedAmzHeaders = @"";
+    for (NSString* xAmzHeader in xAmzHeaders) {
+        NSString* headerValue = [self defaultValueForHeader:xAmzHeader];
+        canonicalizedAmzHeaders = [canonicalizedAmzHeaders
+                                   stringByAppendingFormat:@"%@:%@\n",
+                                   xAmzHeader,
+                                   headerValue];
+    }
+    
+    NSString* requestMethod = @"POST";
+    NSString* canonicalizedResource = [NSString stringWithFormat:@"%@?uploads" ,[self canonicalizedResourceWithKey:key]];
+    NSString* stringToSign = [self stringToSignForRequestMethod:requestMethod contentMD5:contentMD5 mimeType:@"" dateString:dateString headers:canonicalizedAmzHeaders resource:canonicalizedResource];
+    
+    NSString* signature = [self base64EncodedStringFromData:[self HMACSHA1WithKey:self.secretKey string:stringToSign]];
+    NSString* authorizationString = [NSString stringWithFormat:@"AWS %@:%@", self.accessKey, signature];
+    [self setDefaultHeader:@"Authorization" value:authorizationString];
+    
+    NSMutableURLRequest* request = [self requestWithMethod:requestMethod path:canonicalizedResource parameters:nil];
+    
+    
+    AFHTTPRequestOperation* operation = [self HTTPRequestOperationWithRequest:request success:^(AFHTTPRequestOperation* operation, id responseObject) {
+        if (success) success(operation, responseObject);
+    } failure:^(AFHTTPRequestOperation* operation, NSError* error) {
+        if (failure) failure(operation, error);
+    }];
+       
+    [self enqueueHTTPRequestOperation:operation];
+}
+
+- (void)putMultipartData:(NSData *)data
+                     key:(NSString*)key
+                uploadId:(NSString *)uploadId
+              partNumber:(NSNumber *)partNumber
+                progress:(void (^)(NSUInteger bytesWritten, long long totalBytesWritten, long long totalBytesExpectedToWrite))progress
+                 success:(void (^)(id responseObject))success
+                 failure:(void (^)(NSError *error))failure
+{
+    NSDictionary *parameters = @{@"partNumber" : partNumber,
+                                 @"uploadId" : uploadId };
+
+    [self performSelector:@selector(setDefaultHeaders:) withObject:[NSMutableDictionary dictionary]];
+    [self clearAuthorizationHeader];
+    
+    NSString* dateString = [self dateString];
+    [self setDefaultHeader:@"Date" value:dateString];
+
+    NSString* contentMD5 = [self base64EncodedStringFromData:[self MD5FromData:data]];
+    [self setDefaultHeader:@"Content-MD5" value:contentMD5];
+
+    NSString* canonicalizedAmzHeaders = @"";
+    
+    NSString* requestMethod = @"PUT";
+    NSString* canonicalizedResource = [NSString stringWithFormat:@"%@?partNumber=%@&uploadId=%@", [self canonicalizedResourceWithKey:key], [partNumber stringValue], uploadId];
+    
+    NSString* signCanonicalizedResource = [self canonicalizedResourceWithKey:key];
+ 
+    NSString* stringToSign = [self stringToSignForRequestMethod:requestMethod contentMD5:contentMD5 mimeType:@"" dateString:dateString headers:canonicalizedAmzHeaders resource:canonicalizedResource];
+    NSLog(@"String to Sign=\n%@", stringToSign);
+    
+    NSString* signature = [self base64EncodedStringFromData:[self HMACSHA1WithKey:self.secretKey string:stringToSign]];
+    NSString* authorizationString = [NSString stringWithFormat:@"AWS %@:%@", self.accessKey, signature];
+
+    
+    
+    NSMutableURLRequest* request = [self requestWithMethod:requestMethod path:signCanonicalizedResource parameters:parameters];
+    [request addValue:[NSString stringWithFormat:@"%ld", (long)[data length]] forHTTPHeaderField:@"Content-Length"];
+    [request setHTTPBody:data];
+    [self setDefaultHeader:@"Authorization" value:authorizationString];
+    
+	AFHTTPRequestOperation *operation = [self HTTPRequestOperationWithRequest:request success:^(AFHTTPRequestOperation *operation, id responseObject) {
+        NSLog(@"===HEADER===\n%@", [[operation response] allHeaderFields]);
+        if (success) {
+            success([[operation response] allHeaderFields][@"Etag"]);
+        }
+    } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
+        if (failure) {
+            failure(error);
+        }
+    }];
+    [operation setUploadProgressBlock:progress];
+    
+    [self enqueueHTTPRequestOperation:operation];
+    
+}
+
+
+- (void)finalizeMultipartToKey:(NSString*)key
+                       uploadId:(NSString *)uploadId
+                          size:(long long)size
+                          eTags:(NSArray *)eTags
+                        success:(void (^)(id responseObject))success
+                        failure:(void (^)(NSError *error))failure
+{
+    NSDictionary *parameters = @{@"uploadId" : uploadId};
+    
+    NSMutableString *stringBody=[@"<CompleteMultipartUpload>" mutableCopy];
+    NSInteger tagNumber = 0;
+    for (NSString *eTag in eTags) {
+        tagNumber++;
+        [stringBody appendFormat:@"<Part><PartNumber>%d</PartNumber><ETag>%@</ETag></Part>", tagNumber, eTag];
+    }
+    [stringBody appendString:@"</CompleteMultipartUpload>"];
+    
+    NSLog(@" ------- XML -------- \n%@" ,stringBody);
+    
+    
+    NSData *dataBody = [stringBody dataUsingEncoding:NSUnicodeStringEncoding];
+    
+    [self performSelector:@selector(setDefaultHeaders:) withObject:[NSMutableDictionary dictionary]];
+    [self clearAuthorizationHeader];
+    
+    NSString* dateString = [self dateString];
+    [self setDefaultHeader:@"Date" value:dateString];
+    
+    NSString* contentMD5 = @"";
+    NSString* canonicalizedAmzHeaders = @"";
+    
+    NSString* requestMethod = @"POST";
+    NSString* canonicalizedResource = [NSString stringWithFormat:@"%@?uploadId=%@", [self canonicalizedResourceWithKey:key], uploadId];
+    
+    NSString* signCanonicalizedResource = [self canonicalizedResourceWithKey:key];
+    
+    NSString* stringToSign = [self stringToSignForRequestMethod:requestMethod contentMD5:contentMD5 mimeType:@"" dateString:dateString headers:canonicalizedAmzHeaders resource:canonicalizedResource];
+    NSLog(@"String to Sign=\n%@", stringToSign);
+    
+    NSString* signature = [self base64EncodedStringFromData:[self HMACSHA1WithKey:self.secretKey string:stringToSign]];
+    NSString* authorizationString = [NSString stringWithFormat:@"AWS %@:%@", self.accessKey, signature];
+    
+    NSMutableURLRequest* request = [self requestWithMethod:requestMethod path:canonicalizedResource parameters:nil];
+    [request addValue:[NSString stringWithFormat:@"%d", [dataBody length]] forHTTPHeaderField:@"Content-Length"];
+    [request setHTTPBody:dataBody];
+  
+    [self setDefaultHeader:@"Authorization" value:authorizationString];
+    
+    AFHTTPRequestOperation *operation = [self HTTPRequestOperationWithRequest:request success:^(AFHTTPRequestOperation *operation, id responseObject) {
+        NSLog(@"===HEADER===\n%@", [[operation response] allHeaderFields]);
+        if (success) {
+            success(responseObject);
+        }
+    } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
+        if (failure) {
+            failure(error);
+        }
+    }];
+    
+    [self enqueueHTTPRequestOperation:operation];
+    
+}
+
+
 //------------------------------------------------------------------------------
 #pragma mark - Private Implementation
 //------------------------------------------------------------------------------
@@ -281,7 +457,7 @@ NSString * const AFAmazonS3SAEast1Region = @"s3-sa-east-1.amazonaws.com";
 
 - (NSString*)stringToSignForRequestMethod:(NSString*)requestMethod contentMD5:(NSString*)contentMD5 mimeType:(NSString*)mimeType dateString:(NSString*)dateString headers:(NSString*)canonicalizedAmzHeaders resource:(NSString*)canonicalizedResource
 {
-    if ([requestMethod isEqualToString:@"PUT"]) {
+    if ([requestMethod isEqualToString:@"PUT"] && ![mimeType isEqualToString:@""]) {
         [self setDefaultHeader:@"Content-Type" value:mimeType];
     }
     return [NSString stringWithFormat:@"%@\n%@\n%@\n%@\n%@%@", requestMethod, contentMD5, mimeType, dateString, canonicalizedAmzHeaders, canonicalizedResource];
